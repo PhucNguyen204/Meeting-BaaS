@@ -23,7 +23,7 @@ const maskValue = "***MASKED***"
 
 // MaskSecrets returns a shallow copy of m with values for sensitive keys
 // replaced by maskValue. Maps and slices nested inside are NOT recursed
-// into — the caller should only pass flat parameter maps (the TS code does
+// into â€” the caller should only pass flat parameter maps (the TS code does
 // the same).
 //
 // Use this whenever a config blob is logged at startup so credentials never

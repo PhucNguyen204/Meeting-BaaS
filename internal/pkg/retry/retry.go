@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/yourorg/meet-bot-go/internal/pkg/sleep"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/pkg/sleep"
 )
 
 // Options tunes the retry behaviour. Zero values mean "use defaults".

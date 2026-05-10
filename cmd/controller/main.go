@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yourorg/meet-bot-go/internal/pkg/logger"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/pkg/logger"
 )
 
 func main() {

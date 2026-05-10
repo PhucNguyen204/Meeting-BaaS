@@ -16,11 +16,11 @@ import (
 //
 // Events forwarded:
 //
-//   - "console" — page.console messages (info/warn/error mapped to log levels).
-//   - "pageerror" — uncaught JS exceptions in the page.
-//   - "requestfailed" — network request failures (DNS, abort, CORS, etc).
-//   - "crash" — page crash (rare but catastrophic; logged at error level).
-//   - "close" — page closed event (logged at debug level).
+//   - "console" â€” page.console messages (info/warn/error mapped to log levels).
+//   - "pageerror" â€” uncaught JS exceptions in the page.
+//   - "requestfailed" â€” network request failures (DNS, abort, CORS, etc).
+//   - "crash" â€” page crash (rare but catastrophic; logged at error level).
+//   - "close" â€” page closed event (logged at debug level).
 //
 // Returns a teardown func that detaches all listeners. Call it from the
 // caller's defer chain to avoid leaking goroutines if the page survives.

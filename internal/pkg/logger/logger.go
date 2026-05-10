@@ -128,7 +128,7 @@ func New(cfg Config) (*zap.Logger, error) {
 		zapcore.NewCore(enc, zapcore.Lock(os.Stdout), level),
 	}
 
-	// Optional file sink. Errors here are NOT fatal — the stdout core is
+	// Optional file sink. Errors here are NOT fatal â€” the stdout core is
 	// always available so the bot can keep running with degraded logging.
 	if cfg.LogDir != "" && cfg.BotUUID != "" {
 		ws, err := newFileSink(cfg.LogDir, cfg.BotUUID)

@@ -23,7 +23,7 @@ const (
 // RecordingMode controls the layout requested from the meeting client.
 //
 // Both PascalCase and snake_case are accepted on input (the upstream
-// queue normalises one way, the API normalises the other) — see
+// queue normalises one way, the API normalises the other) â€” see
 // [src/singleton.ts:36-56]. The Validate step in validator.go canonicalises
 // to snake_case.
 type RecordingMode string
@@ -34,7 +34,7 @@ const (
 	RecModeAudioOnly   RecordingMode = "audio_only"
 )
 
-// SpeechToTextProvider — kept for compatibility, not used in MVP.
+// SpeechToTextProvider â€” kept for compatibility, not used in MVP.
 type SpeechToTextProvider string
 
 const (
@@ -67,9 +67,9 @@ type EventInfo struct {
 //
 // Port reference: src/types.ts MeetingParams.remote.
 type RemoteConfig struct {
-	APIServerBaseURL  string `json:"api_server_baseurl" mapstructure:"api_server_baseurl"`
-	AWSS3VideoBucket  string `json:"aws_s3_video_bucket" mapstructure:"aws_s3_video_bucket"`
-	AWSS3LogBucket    string `json:"aws_s3_log_bucket" mapstructure:"aws_s3_log_bucket"`
+	APIServerBaseURL string `json:"api_server_baseurl" mapstructure:"api_server_baseurl"`
+	AWSS3VideoBucket string `json:"aws_s3_video_bucket" mapstructure:"aws_s3_video_bucket"`
+	AWSS3LogBucket   string `json:"aws_s3_log_bucket" mapstructure:"aws_s3_log_bucket"`
 }
 
 // BotConfig is the canonical bot session descriptor.
@@ -95,18 +95,18 @@ type BotConfig struct {
 	RecordingMode   RecordingMode   `json:"recording_mode" mapstructure:"recording_mode"`
 
 	// --- Auth & API ------------------------------------------------------
-	UserToken   string `json:"user_token" mapstructure:"user_token"`
-	BotsAPIKey  string `json:"bots_api_key" mapstructure:"bots_api_key"`
-	WebhookURL  string `json:"bots_webhook_url,omitempty" mapstructure:"bots_webhook_url"`
-	Secret      string `json:"secret,omitempty" mapstructure:"secret"`
+	UserToken  string `json:"user_token" mapstructure:"user_token"`
+	BotsAPIKey string `json:"bots_api_key" mapstructure:"bots_api_key"`
+	WebhookURL string `json:"bots_webhook_url,omitempty" mapstructure:"bots_webhook_url"`
+	Secret     string `json:"secret,omitempty" mapstructure:"secret"`
 
 	// --- Speech-to-text (compat) -----------------------------------------
-	UseMyVocabulary       bool                 `json:"use_my_vocabulary" mapstructure:"use_my_vocabulary"`
-	Vocabulary            []string             `json:"vocabulary" mapstructure:"vocabulary"`
-	ForceLang             bool                 `json:"force_lang" mapstructure:"force_lang"`
-	TranslationLang       string               `json:"translation_lang,omitempty" mapstructure:"translation_lang"`
-	SpeechToTextProvider  SpeechToTextProvider `json:"speech_to_text_provider,omitempty" mapstructure:"speech_to_text_provider"`
-	SpeechToTextAPIKey    string               `json:"speech_to_text_api_key,omitempty" mapstructure:"speech_to_text_api_key"`
+	UseMyVocabulary      bool                 `json:"use_my_vocabulary" mapstructure:"use_my_vocabulary"`
+	Vocabulary           []string             `json:"vocabulary" mapstructure:"vocabulary"`
+	ForceLang            bool                 `json:"force_lang" mapstructure:"force_lang"`
+	TranslationLang      string               `json:"translation_lang,omitempty" mapstructure:"translation_lang"`
+	SpeechToTextProvider SpeechToTextProvider `json:"speech_to_text_provider,omitempty" mapstructure:"speech_to_text_provider"`
+	SpeechToTextAPIKey   string               `json:"speech_to_text_api_key,omitempty" mapstructure:"speech_to_text_api_key"`
 
 	// --- Streaming -------------------------------------------------------
 	StreamingInput          string `json:"streaming_input,omitempty" mapstructure:"streaming_input"`
@@ -117,16 +117,16 @@ type BotConfig struct {
 	CustomBrandingBotPath string `json:"custom_branding_bot_path,omitempty" mapstructure:"custom_branding_bot_path"`
 
 	// --- Behaviour -------------------------------------------------------
-	AutomaticLeave              AutomaticLeave `json:"automatic_leave" mapstructure:"automatic_leave"`
-	LocalRecordingServerLocation string        `json:"local_recording_server_location,omitempty" mapstructure:"local_recording_server_location"`
+	AutomaticLeave               AutomaticLeave `json:"automatic_leave" mapstructure:"automatic_leave"`
+	LocalRecordingServerLocation string         `json:"local_recording_server_location,omitempty" mapstructure:"local_recording_server_location"`
 
 	// --- Output ----------------------------------------------------------
 	MP4S3Path string `json:"mp4_s3_path,omitempty" mapstructure:"mp4_s3_path"`
 
 	// --- Environment / infra --------------------------------------------
-	Environ                    string        `json:"environ" mapstructure:"environ"`
-	AWSS3TemporaryAudioBucket  string        `json:"aws_s3_temporary_audio_bucket,omitempty" mapstructure:"aws_s3_temporary_audio_bucket"`
-	Remote                     *RemoteConfig `json:"remote,omitempty" mapstructure:"remote"`
+	Environ                   string        `json:"environ" mapstructure:"environ"`
+	AWSS3TemporaryAudioBucket string        `json:"aws_s3_temporary_audio_bucket,omitempty" mapstructure:"aws_s3_temporary_audio_bucket"`
+	Remote                    *RemoteConfig `json:"remote,omitempty" mapstructure:"remote"`
 
 	// --- Timing & retry --------------------------------------------------
 	StartTime  int64 `json:"start_time,omitempty" mapstructure:"start_time"`

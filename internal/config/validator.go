@@ -15,7 +15,7 @@ import (
 // the bot can safely begin its initialisation flow.
 //
 // TODO(user): convert to multi-error reporting once we wire a validator
-// library — the original TS only checks one field at a time, this is OK
+// library â€” the original TS only checks one field at a time, this is OK
 // for now.
 func (c *BotConfig) Validate() error {
 	if c == nil {

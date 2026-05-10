@@ -1,4 +1,4 @@
-module github.com/yourorg/meet-bot-go
+module github.com/PhucNguyen204/Meeting-BaaS
 
 go 1.24
 

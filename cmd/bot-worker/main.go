@@ -2,13 +2,13 @@
 //
 // Lifecycle:
 //
-//	cat bot.config.json | bot-worker
+//		cat bot.config.json | bot-worker
 //
-// 1. Reads BotConfig from stdin (or BOT_CONFIG_FILE / BOT_CONFIG_JSON env
-//    if stdin is empty).
-// 2. Builds the structured logger.
-// 3. Constructs the App graph (browser driver + meet provider + http server).
-// 4. Runs until SIGINT/SIGTERM, /stop_record, or the meeting ends.
+//	 1. Reads BotConfig from stdin (or BOT_CONFIG_FILE / BOT_CONFIG_JSON env
+//	    if stdin is empty).
+//	 2. Builds the structured logger.
+//	 3. Constructs the App graph (browser driver + meet provider + http server).
+//	 4. Runs until SIGINT/SIGTERM, /stop_record, or the meeting ends.
 //
 // Port reference: src/main.ts (entry point).
 package main
@@ -23,11 +23,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/yourorg/meet-bot-go/internal/app"
-	"github.com/yourorg/meet-bot-go/internal/config"
-	"github.com/yourorg/meet-bot-go/internal/logic/browser"
-	"github.com/yourorg/meet-bot-go/internal/pkg/logger"
-	"github.com/yourorg/meet-bot-go/internal/pkg/version"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/app"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/config"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/domain"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/pkg/logger"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/pkg/version"
 )
 
 func main() {
@@ -86,7 +86,7 @@ func main() {
 
 	runOpts := app.BotWorkerOptions{
 		HTTPAddr: *flagHTTPAddr,
-		BrowserOpts: browser.LaunchOptions{
+		BrowserOpts: domain.BrowserLaunchOptions{
 			Resolution:            "720",
 			Headless:              false,
 			PermissionsMicrophone: cfg.StreamingInput != "",

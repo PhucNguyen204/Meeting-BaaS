@@ -5,7 +5,7 @@
 # FFmpeg/EFS bits are left in place so Phase 2 (recorder) can reuse this
 # image without changes.
 
-FROM golang:1.22-bookworm AS build
+FROM golang:1.24-bookworm AS build
 WORKDIR /src
 
 COPY go.mod go.sum* ./

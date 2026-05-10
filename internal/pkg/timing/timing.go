@@ -13,8 +13,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/yourorg/meet-bot-go/internal/pkg/logger"
-	"github.com/yourorg/meet-bot-go/internal/pkg/sleep"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/pkg/logger"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/pkg/sleep"
 )
 
 // AbortCheck returns true to short-circuit the wait. Callers typically

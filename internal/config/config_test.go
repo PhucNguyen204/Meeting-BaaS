@@ -190,7 +190,7 @@ func TestValidate_RecordingModeNormalisation(t *testing.T) {
 	}{
 		{"SpeakerView", RecModeSpeakerView},
 		{"speaker_view", RecModeSpeakerView},
-		{"GalleryView", RecModeSpeakerView}, // intentional: gallery → speaker
+		{"GalleryView", RecModeSpeakerView}, // intentional: gallery â†’ speaker
 		{"gallery_view", RecModeSpeakerView},
 		{"AudioOnly", RecModeAudioOnly},
 		{"audio_only", RecModeAudioOnly},
@@ -229,12 +229,12 @@ func TestIsServerless(t *testing.T) {
 
 func TestMaskedClone(t *testing.T) {
 	cfg := &BotConfig{
-		UserToken:        "secret-token",
-		BotsAPIKey:       "secret-key",
+		UserToken:          "secret-token",
+		BotsAPIKey:         "secret-key",
 		SpeechToTextAPIKey: "stt-key",
-		Secret:           "my-secret",
-		ZoomSDKPwd:       "zoom-pwd",
-		BotUUID:          "visible-uuid",
+		Secret:             "my-secret",
+		ZoomSDKPwd:         "zoom-pwd",
+		BotUUID:            "visible-uuid",
 	}
 	clone := cfg.MaskedClone()
 	if clone.UserToken != "***MASKED***" {

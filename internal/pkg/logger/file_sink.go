@@ -15,17 +15,17 @@ import (
 // writes a single bot.log per invocation, then uploads it to S3 at
 // session end (Phase 4).
 //
-// Rotation defaults are deliberately conservative — bot sessions usually
+// Rotation defaults are deliberately conservative â€” bot sessions usually
 // stay within a single file but we cap to 100 MB per file just in case
 // DEBUG_LOGS leaves something verbose running. Rotation parameters can be
 // tuned later via [Config] without breaking callers.
 
 const (
-	defaultMaxSizeMB    = 100
-	defaultMaxBackups   = 5
-	defaultMaxAgeDays   = 14
-	defaultPermDir      = 0o755
-	defaultLogFileName  = "bot.log"
+	defaultMaxSizeMB   = 100
+	defaultMaxBackups  = 5
+	defaultMaxAgeDays  = 14
+	defaultPermDir     = 0o755
+	defaultLogFileName = "bot.log"
 )
 
 // newFileSink returns a zap WriteSyncer that writes the per-bot rotating

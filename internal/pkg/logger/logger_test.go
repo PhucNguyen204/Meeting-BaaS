@@ -8,7 +8,7 @@ import (
 )
 
 // Integration of context helpers and mask logic. These are quick sanity
-// checks — fuller tests come once the surrounding packages exist.
+// checks â€” fuller tests come once the surrounding packages exist.
 
 func TestFromContext_NoLogger_ReturnsNop(t *testing.T) {
 	got := FromContext(context.Background())
@@ -36,14 +36,14 @@ func TestWithState_AttachesField(t *testing.T) {
 
 func TestMaskSecrets_KnownKeys(t *testing.T) {
 	in := map[string]any{
-		"meeting_url":           "https://meet.google.com/abc",
-		"user_token":            "supersecret",
-		"bots_api_key":          "key",
+		"meeting_url":            "https://meet.google.com/abc",
+		"user_token":             "supersecret",
+		"bots_api_key":           "key",
 		"speech_to_text_api_key": "k2",
-		"bots_webhook_url":      "https://hooks/x",
-		"secret":                "s",
-		"zoom_sdk_pwd":          "p",
-		"normal":                "untouched",
+		"bots_webhook_url":       "https://hooks/x",
+		"secret":                 "s",
+		"zoom_sdk_pwd":           "p",
+		"normal":                 "untouched",
 	}
 	out := MaskSecrets(in)
 	for _, k := range []string{

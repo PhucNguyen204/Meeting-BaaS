@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yourorg/meet-bot-go/internal/app"
-	"github.com/yourorg/meet-bot-go/internal/pkg/logger"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/app"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/pkg/logger"
 )
 
 func main() {

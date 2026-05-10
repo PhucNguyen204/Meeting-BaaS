@@ -71,7 +71,7 @@ var (
 	ErrApiRequest = errors.New("stopped via api request")
 
 	// ErrExitingBeforeRecord indicates a stop request arrived before the
-	// recorder started — used to suppress webhook noise.
+	// recorder started â€” used to suppress webhook noise.
 	ErrExitingBeforeRecord = errors.New("exiting before record")
 
 	// ErrStreamingSetupFailed wraps audio/video pipeline setup errors.
