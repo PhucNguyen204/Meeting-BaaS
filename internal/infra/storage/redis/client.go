@@ -109,3 +109,12 @@ func (c *Client) PublishStopSignal(ctx context.Context, botUUID, reason string) 
 func (c *Client) Close() error {
 	return c.rdb.Close()
 }
+
+// Raw returns the underlying *redis.Client for callers that need access to
+// commands not wrapped here (e.g., XADD/XREADGROUP for the queue package).
+func (c *Client) Raw() *redis.Client {
+	if c == nil {
+		return nil
+	}
+	return c.rdb
+}
