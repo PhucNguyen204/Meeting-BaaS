@@ -1,0 +1,2 @@
+# Phase 6: Helm charts for bot-worker (k8s Job template + RBAC),
+# api-server (Deployment), controller (Deployment + RBAC).

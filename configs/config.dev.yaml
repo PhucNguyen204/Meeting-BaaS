@@ -1,0 +1,30 @@
+# Optional development overrides for bot-worker.
+# These map 1-1 to environment variables; the bot-worker reads ENV first,
+# then falls back to this file when present at $CONFIG_FILE or ./configs/config.dev.yaml.
+
+logging:
+  level: debug          # trace | debug | info | warn | error
+  format: json          # json | console
+  dir: ./logs           # base dir for per-bot log files
+  enable_page_hook: true
+
+browser:
+  chrome_path: /usr/bin/google-chrome
+  display: ":99"
+  resolution: "720"     # 720 | 1080
+  headless: false       # In production we use Xvfb, never real headless.
+  slow_mo_ms: 0
+
+recording:
+  output_dir: ./recordings
+
+http:
+  bot_worker_addr: 0.0.0.0:8080
+  api_server_addr: 0.0.0.0:7000
+
+# Phase 3+ — placeholders, not consumed in Phase 1
+infra:
+  redis_url: ""
+  postgres_dsn: ""
+  s3_endpoint: ""
+  s3_bucket: ""

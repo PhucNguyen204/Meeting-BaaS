@@ -1,0 +1,23 @@
+/bin/
+/recordings/
+/logs/
+/tmp/
+*.log
+
+# Go
+*.test
+*.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local env
+.env
+.env.local

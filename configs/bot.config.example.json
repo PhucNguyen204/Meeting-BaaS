@@ -1,0 +1,38 @@
+{
+    "id": "meeting-bot-session",
+    "use_my_vocabulary": false,
+    "meeting_url": "https://meet.google.com/abc-defg-hij",
+    "user_token": "***REPLACE_ME***",
+    "bot_name": "Recording Bot",
+    "user_id": 123,
+    "session_id": "dev-session",
+    "email": "bot@example.com",
+    "vocabulary": [],
+    "force_lang": false,
+    "speech_to_text_provider": "Default",
+    "speech_to_text_api_key": "",
+    "streaming_input": "",
+    "streaming_output": "",
+    "streaming_audio_frequency": 24000,
+    "bots_api_key": "***REPLACE_ME***",
+    "bots_webhook_url": "",
+    "bot_uuid": "11111111-2222-3333-4444-555555555555",
+    "enter_message": "Recording bot has joined the meeting",
+    "recording_mode": "speaker_view",
+    "local_recording_server_location": "docker",
+    "automatic_leave": {
+        "waiting_room_timeout": 600,
+        "noone_joined_timeout": 600,
+        "silence_timeout": 600
+    },
+    "mp4_s3_path": "recordings/output.mp4",
+    "custom_branding_bot_path": "",
+    "environ": "local",
+    "aws_s3_temporary_audio_bucket": "local-audio-bucket",
+    "remote": null,
+    "start_time": 0,
+    "secret": "***REPLACE_ME***",
+    "event": {
+        "uuid": "00000000-0000-0000-0000-000000000000"
+    }
+}

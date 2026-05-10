@@ -1,0 +1,44 @@
+# golangci-lint configuration for meet-bot-go.
+# Keep this minimal at scaffold stage; tighten as the codebase fills out.
+
+run:
+  timeout: 3m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - revive
+    - gocritic
+    - gosec
+    - bodyclose
+
+issues:
+  exclude-dirs:
+    - bin
+    - tmp
+    - logs
+    - recordings
+  exclude-rules:
+    # Skeletons return "not implemented" errors; allow during scaffold phase.
+    - text: "should not use dot imports"
+      linters: [revive]
+    - path: _test\.go
+      linters: [gosec, errcheck]
+
+linters-settings:
+  revive:
+    rules:
+      - name: package-comments
+        disabled: true
+  gocritic:
+    disabled-checks:
+      - ifElseChain

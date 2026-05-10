@@ -1,0 +1,108 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - bot-net
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: meetbot
+      POSTGRES_PASSWORD: meetbot
+      POSTGRES_DB: meetbot
+    ports: ["5432:5432"]
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "meetbot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - bot-net
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    networks:
+      - bot-net
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command: /init-minio.sh
+    volumes:
+      - ./init-minio.sh:/init-minio.sh:ro
+    networks:
+      - bot-net
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+    networks:
+      - bot-net
+
+  bot-worker:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/bot-worker.Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      # Bot config (override with docker compose run -e)
+      BOT_UUID: "11111111-2222-3333-4444-555555555555"
+      LOG_LEVEL: debug
+      REDIS_URL: "redis://redis:6379"
+      S3_ENDPOINT: "http://minio:9000"
+      S3_BUCKET: "recordings"
+      S3_ACCESS_KEY: "minioadmin"
+      S3_SECRET_KEY: "minioadmin"
+      DATABASE_URL: "postgres://meetbot:meetbot@postgres:5432/meetbot?sslmode=disable"
+      DISPLAY: ":99"
+    ports:
+      - "8080:8080"   # HTTP control plane
+      - "5900:5900"   # VNC (optional debug)
+    volumes:
+      - ./../../configs:/app/configs:ro
+      - recording_data:/tmp/recordings
+    networks:
+      - bot-net
+
+volumes:
+  pg_data:
+  minio_data:
+  recording_data:
+
+networks:
+  bot-net:
+    driver: bridge
