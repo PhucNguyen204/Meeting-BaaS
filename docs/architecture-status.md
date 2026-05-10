@@ -194,11 +194,30 @@ Các thư mục dưới đây tồn tại do refactor dở dang. Chạy `rg -l "
 | Phase 3 skeleton | 4 migrations (`bots`, `bot_events`, `recordings`, `webhook_deliveries`); `postgres.Pool` + `BotRepo`; `queue.Producer/Consumer` (Redis Streams) + `PublishStop` (Pub/Sub); `internal/app/apiserver.go` + `internal/app/controller.go` + main wiring |
 | Integration tests | `testcontainers-go` cho Postgres (CRUD `BotRepo`), Redis (XADD/XREADGROUP/XACK + Pub/Sub stop), MinIO (`UploadFile` round-trip) |
 
+### Đã làm trong batch API server v2 đầy đủ
+
+| Hạng mục | Sản phẩm |
+|---|---|
+| Migrations 005-010 | `tenants`, `users`, `teams`, `team_members`, `secrets` (envelope encryption), `api_keys` (hashed), `idempotency_keys`, `ALTER TABLE bots` thêm 18 cột v2 (tenant_id, api_key_id, idempotency_key, deduplication_hash, transcription_*, streaming_*, callback_*, join_at, allow_multiple_bots, extra JSONB, data_deleted_at, deleted_at), `alerts`, `usage_records`, `webhook_endpoints`, `webhook_event_outbox`, `data_retention_jobs` |
+| Repos | `TenantRepo`, `UserRepo`, `APIKeyRepo` (Issue/LookupByPlaintext/Revoke/MarkUsed), `IdempotencyRepo` (BeginRequest/CompleteRequest), `BotRepo.InsertV2/GetV2/GetStatusLight/MarkDataDeleted`, `AlertsRepo`, `UsageRepo`, `OutboxRepo`, `RetentionRepo` |
+| Middleware | `Auth` (Bearer + x-meeting-baas-api-key + Redis cache), `RateLimit` (per-key INCR), `Idempotency` (capture + replay), `RequestLogger` (zap), `Recover` (panic → INTERNAL envelope) |
+| Response envelope | Package `respond` chung cho v2 + middleware (tránh import cycle); 10 mã lỗi chuẩn Meeting BaaS |
+| Endpoints v2 | 11 endpoints: `POST /bots`, `POST /bots/scheduled`, `GET /bots/{id}`, `GET /bots/{id}/status`, `POST /bots/{id}/leave-bot`, `POST /bots/{id}/pause-recording`, `POST /bots/{id}/resume-recording`, `POST /bots/{id}/chat-messages`, `DELETE /bots/{id}/delete-data`, `GET /usage`, `GET /alerts` |
+| Bot-worker command channel | Subscribe Redis Pub/Sub `bot:cmd:<uuid>`, dispatch pause/resume/chat tới `MeetingContext` + `meet.SendEntryMessage` |
+| Backward compat | `/v1/bots` (POST/GET/{id}/stop) giữ nguyên không auth cho client cũ |
+| Tests | Unit: middleware auth/rate-limit (miniredis), v2 validateCreate / detectProvider / leave-bot 503; Integration: end-to-end `POST /v2/bots` qua testcontainers postgres+redis (insert row + XADD + idempotent replay + GET) |
+| Docs | `docs/api-server.md` — auth + idempotency + rate-limit + 11 endpoints + error codes + examples + cấu hình env; cập nhật mục 9 status này |
+
 ### Việc còn lại để khép Phase 4–6
 
-- Streaming WS (Phase 5): chưa có, audio capture đã sẵn sàng feed.
+- Webhook delivery worker (drain `webhook_event_outbox` với `FOR UPDATE SKIP LOCKED`, retry với backoff, SVIX-style signing) — Phase 4.
+- Streaming WS (Phase 5) — audio capture đã sẵn sàng feed; cần WebSocket server + resample 48→24kHz.
+- Calendar endpoints (`/v2/calendars/**`) — Phase 5.5.
+- Transcription provider integration thật (Gladia/Deepgram) — Phase 4 sau outbox.
+- MongoDB collections cho transcripts/speaker_timeline/screenshots — phase tới khi STT integration.
 - K8s Job spawner thay `os/exec` (Phase 6) + Helm chart.
 - Observability: Prometheus `/metrics` + OpenTelemetry traces.
-- Webhook event lifecycle đầy đủ (`joining_call`, `in_waiting_room`, `in_call_recording`, …).
+- Stripe billing integration — Phase 7.
+- Apply RLS thực (per-request `SET LOCAL app.tenant_id`) — schema đã sẵn, cần per-request conn từ pgxpool.
 
-Xem chi tiết roadmap tại [implementation-plan.md](../../docs/implementation-plan.md) và quyết định kiến trúc tại [decision-records/0001-playwright-go-vs-node-sidecar.md](decision-records/0001-playwright-go-vs-node-sidecar.md).
+Xem chi tiết roadmap tại [implementation-plan.md](../../docs/implementation-plan.md), thiết kế DB tại [database-design.md](database-design.md), REST contract tại [api-server.md](api-server.md), và quyết định kiến trúc tại [decision-records/0001-playwright-go-vs-node-sidecar.md](decision-records/0001-playwright-go-vs-node-sidecar.md).
