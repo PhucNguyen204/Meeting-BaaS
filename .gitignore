@@ -7,6 +7,9 @@
 # Go
 *.test
 *.out
+*.exe
+coverage
+coverage.*
 coverage.html
 
 # IDE
@@ -21,3 +24,11 @@ Thumbs.db
 # Local env
 .env
 .env.local
+
+# Tooling artefacts
+*.5781487861480757649
+
+# Agent skill caches and upstream-docs reference (local-only, not part of the codebase)
+.agents/
+skills-lock.json
+docs/meetingbaas/
