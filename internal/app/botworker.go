@@ -9,6 +9,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/PhucNguyen204/Meeting-BaaS/internal/infra/recorder"
 	"github.com/PhucNguyen204/Meeting-BaaS/internal/infra/snapshot"
 	"github.com/PhucNguyen204/Meeting-BaaS/internal/infra/speaker"
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/infra/storage/s3"
 	"github.com/PhucNguyen204/Meeting-BaaS/internal/infra/webhook"
 	"github.com/PhucNguyen204/Meeting-BaaS/internal/pkg/logger"
 	sm "github.com/PhucNguyen204/Meeting-BaaS/internal/usecase/bot"
@@ -71,6 +74,8 @@ func NewBotWorker(cfg *config.BotConfig, log *zap.Logger, opts BotWorkerOptions)
 	obs := dialog.New(log)
 	snap := snapshot.New(log, "")
 	speakers := speaker.NewManager(log)
+	speakersObs := meet.NewSpeakersObserver(log, speakers)
+	audioCap := meet.NewAudioCapture(log, nil) // nil callback ⇒ discard chunks until streaming wired
 
 	httpAddr := opts.HTTPAddr
 	if httpAddr == "" {
@@ -94,14 +99,27 @@ func NewBotWorker(cfg *config.BotConfig, log *zap.Logger, opts BotWorkerOptions)
 		wh = webhook.NewBotWebhooker(sender, cfg.WebhookURL)
 	}
 
+	// Build S3 uploader from environment when configured. In serverless / dev
+	// runs without S3 env vars, leave nil so CleanupState skips upload.
+	uploader, err := buildS3Uploader(log)
+	if err != nil {
+		log.Warn("s3 uploader disabled", zap.Error(err))
+	}
+
 	// Build state map using Composition Root pattern.
 	stateMap := states.BuildStateMap(states.Dependencies{
 		Driver:      driver,
 		Provider:    prov,
 		BrowserOpts: opts.BrowserOpts,
 		Recorder:    rec,
-		Uploader:    nil, // S3 wired when env vars present
+		Uploader:    uploader,
 		Webhooker:   wh,
+		PageHooks: []states.PageHook{
+			audioCapEnableHook{cap: audioCap},
+			speakersObs,
+			obs,
+		},
+		Speakers: speakers,
 	})
 
 	// Build meeting context.
@@ -143,8 +161,8 @@ func (a *BotWorker) Run(ctx context.Context, opts BotWorkerOptions) error {
 	// HTTP control plane (background).
 	machineStopper := &machineStopper{machine: a.Machine}
 	a.HTTP = httph.New(a.HTTPAddr, a.Logger, machineStopper)
-	a.HTTP.SetStatusProvider(&machineStatusProvider{machine: a.Machine})
-	a.HTTP.SetPauseResumer(&machinePauseResumer{machine: a.Machine})
+	a.HTTP.SetStatusProvider(&machineStatusProvider{machine: a.Machine, mc: a.Machine.Context()})
+	a.HTTP.SetPauseResumer(&machinePauseResumer{machine: a.Machine, mc: a.Machine.Context()})
 
 	httpCtx, cancelHTTP := context.WithCancel(ctx)
 	defer cancelHTTP()
@@ -181,30 +199,93 @@ func (s *machineStopper) Stop(_ context.Context, reason string) error {
 	return nil
 }
 
-// machineStatusProvider implements httph.StatusProvider.
+// machineStatusProvider implements httph.StatusProvider by reading from
+// the machine's state and meeting context.
 type machineStatusProvider struct {
 	machine *sm.Machine
+	mc      *sm.MeetingContext
 }
 
 func (p *machineStatusProvider) CurrentState() string {
 	return string(p.machine.CurrentState())
 }
 
-func (p *machineStatusProvider) StartTime() int64  { return 0 }
-func (p *machineStatusProvider) IsPaused() bool    { return false }
-func (p *machineStatusProvider) EndReason() string { return "" }
+func (p *machineStatusProvider) StartTime() int64 { return p.mc.GetStartTime() }
+func (p *machineStatusProvider) IsPaused() bool   { return p.mc.GetPaused() }
+func (p *machineStatusProvider) EndReason() string {
+	return string(p.mc.GetEndReason())
+}
 
-// machinePauseResumer implements httph.PauseResumer.
+// machinePauseResumer implements httph.PauseResumer by toggling
+// MeetingContext.IsPaused. The recording state polling loop reads the flag
+// each tick and transitions to Paused/Resuming accordingly.
 type machinePauseResumer struct {
 	machine *sm.Machine
+	mc      *sm.MeetingContext
 }
 
 func (pr *machinePauseResumer) Pause(_ context.Context) error {
-	// TODO: wire to MeetingContext.IsPaused
-	return fmt.Errorf("pause not yet wired to state machine")
+	state := pr.machine.CurrentState()
+	if state != sm.StateRecording && state != sm.StatePaused {
+		return fmt.Errorf("cannot pause from state %q", state)
+	}
+	pr.mc.SetPaused(true)
+	return nil
 }
 
 func (pr *machinePauseResumer) Resume(_ context.Context) error {
-	// TODO: wire to MeetingContext.IsPaused
-	return fmt.Errorf("resume not yet wired to state machine")
+	state := pr.machine.CurrentState()
+	if state != sm.StatePaused && state != sm.StateRecording {
+		return fmt.Errorf("cannot resume from state %q", state)
+	}
+	pr.mc.SetPaused(false)
+	return nil
+}
+
+// audioCapEnableHook adapts meet.AudioCapture to the states.PageHook
+// interface (Attach -> Enable).
+type audioCapEnableHook struct{ cap *meet.AudioCapture }
+
+func (h audioCapEnableHook) Attach(ctx context.Context, page domain.Page) error {
+	if h.cap == nil {
+		return nil
+	}
+	return h.cap.Enable(ctx, page)
+}
+
+// buildS3Uploader constructs a states.Uploader from environment variables.
+// Returns (nil, nil) if S3 is not configured (serverless / local dev mode).
+//
+// Env vars (all required to enable upload):
+//
+//	S3_BUCKET            — destination bucket (required)
+//	AWS_ACCESS_KEY_ID    — credentials
+//	AWS_SECRET_ACCESS_KEY
+//	S3_ENDPOINT          — optional (MinIO / non-AWS)
+//	AWS_REGION           — optional, defaults "us-east-1"
+//	S3_USE_PATH_STYLE    — optional bool, true for MinIO
+func buildS3Uploader(log *zap.Logger) (states.Uploader, error) {
+	bucket := os.Getenv("S3_BUCKET")
+	if bucket == "" {
+		return nil, nil
+	}
+	access := os.Getenv("AWS_ACCESS_KEY_ID")
+	secret := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	if access == "" || secret == "" {
+		return nil, fmt.Errorf("AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY not set")
+	}
+	pathStyle, _ := strconv.ParseBool(os.Getenv("S3_USE_PATH_STYLE"))
+
+	cli, err := s3.NewClient(context.Background(), log, s3.Options{
+		Endpoint:     os.Getenv("S3_ENDPOINT"),
+		Region:       os.Getenv("AWS_REGION"),
+		Bucket:       bucket,
+		AccessKey:    access,
+		SecretKey:    secret,
+		UsePathStyle: pathStyle,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("s3 client: %w", err)
+	}
+	return cli, nil
 }

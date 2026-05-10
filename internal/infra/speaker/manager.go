@@ -116,3 +116,11 @@ func (m *Manager) Snapshot() Snapshot {
 		AllParticipants: all,
 	}
 }
+
+// SnapshotNames implements states.SpeakerSnapshot. Returns the same data as
+// Snapshot but as a 2-tuple, decoupling the states package from the speaker
+// types.
+func (m *Manager) SnapshotNames() ([]string, []string) {
+	s := m.Snapshot()
+	return s.ActiveSpeakers, s.AllParticipants
+}

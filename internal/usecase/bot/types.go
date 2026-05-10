@@ -200,6 +200,44 @@ func (mc *MeetingContext) ShouldStop() bool {
 	return mc.EndReason != ""
 }
 
+// SetPaused atomically toggles the IsPaused flag. Recording state's poll
+// loop reads the flag each tick to decide whether to transition to Paused.
+//
+// Returns the previous value (useful for idempotent HTTP handlers).
+func (mc *MeetingContext) SetPaused(paused bool) bool {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	prev := mc.IsPaused
+	mc.IsPaused = paused
+	if paused && !prev {
+		mc.PauseStartTime = time.Now()
+	} else if !paused && prev {
+		mc.TotalPauseDuration += time.Since(mc.PauseStartTime)
+	}
+	return prev
+}
+
+// GetPaused atomically reads IsPaused.
+func (mc *MeetingContext) GetPaused() bool {
+	mc.mu.RLock()
+	defer mc.mu.RUnlock()
+	return mc.IsPaused
+}
+
+// GetStartTime atomically reads StartTime.
+func (mc *MeetingContext) GetStartTime() int64 {
+	mc.mu.RLock()
+	defer mc.mu.RUnlock()
+	return mc.StartTime
+}
+
+// SetStartTime atomically writes StartTime. Called by InCallState.
+func (mc *MeetingContext) SetStartTime(t int64) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.StartTime = t
+}
+
 // State is the interface every state implementation must satisfy.
 //
 // Port reference: src/state-machine/states/base-state.ts BaseState.

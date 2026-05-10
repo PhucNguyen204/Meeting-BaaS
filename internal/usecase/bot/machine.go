@@ -94,6 +94,14 @@ func (m *Machine) CurrentState() StateType {
 	return m.current
 }
 
+// Context returns the meeting context. Allows the HTTP control plane and
+// other goroutines to read mutex-guarded state without going through the
+// state machine itself. Returned pointer is shared - mutations must use
+// the type's thread-safe setters.
+func (m *Machine) Context() *MeetingContext {
+	return m.mc
+}
+
 // RequestStop sets the end reason on the meeting context, which the
 // recording state's polling loop will detect.
 //

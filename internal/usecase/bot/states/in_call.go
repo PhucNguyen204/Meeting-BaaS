@@ -15,7 +15,8 @@ import (
 //
 // Port reference: src/state-machine/states/in-call-state.ts.
 type InCallState struct {
-	Recorder Recorder // injected FFmpeg recorder
+	Recorder  Recorder   // injected FFmpeg recorder
+	PageHooks []PageHook // audio capture, speakers observer, dialog observer
 }
 
 func (s *InCallState) Name() sm.StateType { return sm.StateInCall }
@@ -31,6 +32,18 @@ func (s *InCallState) Execute(ctx context.Context, mc *sm.MeetingContext) (sm.Tr
 		return sm.Transition{Next: sm.StateCleanup}, nil
 	}
 
+	// Attach page-bound observers (audio capture, speakers, dialog). Failures
+	// are logged but don't abort the session — recording is still useful even
+	// without the speaker timeline.
+	for _, hook := range s.PageHooks {
+		if hook == nil || mc.Page == nil {
+			continue
+		}
+		if err := hook.Attach(ctx, mc.Page); err != nil {
+			log.Warn("page hook attach failed", zap.Error(err))
+		}
+	}
+
 	// Start FFmpeg recording.
 	if s.Recorder != nil {
 		if err := s.Recorder.Start(ctx); err != nil {
@@ -42,8 +55,8 @@ func (s *InCallState) Execute(ctx context.Context, mc *sm.MeetingContext) (sm.Tr
 		log.Warn("no recorder configured, skipping recording start")
 	}
 
-	// Record start time.
-	mc.StartTime = time.Now().UnixMilli()
+	// Record start time (thread-safe; HTTP /status reads via GetStartTime).
+	mc.SetStartTime(time.Now().UnixMilli())
 	mc.LastSpeakerTime = time.Now()
 
 	log.Info("transitioning to recording state")

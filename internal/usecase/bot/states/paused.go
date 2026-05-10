@@ -24,15 +24,14 @@ func (s *PausedState) Execute(ctx context.Context, mc *sm.MeetingContext) (sm.Tr
 	log := logger.FromContext(ctx).With(zap.String("state", "paused"))
 	log.Info("recording paused")
 
-	mc.PauseStartTime = time.Now()
-
 	if s.Recorder != nil {
 		if err := s.Recorder.Pause(ctx); err != nil {
 			log.Warn("recorder pause failed", zap.Error(err))
 		}
 	}
 
-	// Poll for resume or stop.
+	// Poll for resume or stop. mc.SetPaused tracks PauseStartTime /
+	// TotalPauseDuration internally; reads use GetPaused for thread-safety.
 	for {
 		if ctx.Err() != nil {
 			mc.SetEndReason(sm.EndReasonApiRequest)
@@ -41,7 +40,7 @@ func (s *PausedState) Execute(ctx context.Context, mc *sm.MeetingContext) (sm.Tr
 		if mc.ShouldStop() {
 			return sm.Transition{Next: sm.StateCleanup}, nil
 		}
-		if !mc.IsPaused {
+		if !mc.GetPaused() {
 			log.Info("resume signal received")
 			return sm.Transition{Next: sm.StateResuming}, nil
 		}
@@ -62,11 +61,8 @@ func (s *ResumingState) Execute(ctx context.Context, mc *sm.MeetingContext) (sm.
 	log := logger.FromContext(ctx).With(zap.String("state", "resuming"))
 	log.Info("resuming recording")
 
-	// Calculate total pause duration.
-	if !mc.PauseStartTime.IsZero() {
-		mc.TotalPauseDuration += time.Since(mc.PauseStartTime)
-		mc.PauseStartTime = time.Time{}
-	}
+	// PauseStartTime / TotalPauseDuration are now updated atomically by
+	// MeetingContext.SetPaused; nothing to do here besides resuming ffmpeg.
 
 	if s.Recorder != nil {
 		if err := s.Recorder.Resume(ctx); err != nil {

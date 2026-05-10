@@ -13,9 +13,11 @@ type Dependencies struct {
 	Driver      domain.BrowserDriver
 	Provider    meeting.Provider
 	BrowserOpts domain.BrowserLaunchOptions
-	Recorder    Recorder  // nil = no recording
-	Uploader    Uploader  // nil = no upload
-	Webhooker   Webhooker // nil = no webhooks
+	Recorder    Recorder        // nil = no recording
+	Uploader    Uploader        // nil = no upload
+	Webhooker   Webhooker       // nil = no webhooks
+	PageHooks   []PageHook      // attached on InCall (audio, speakers, dialog)
+	Speakers    SpeakerSnapshot // nil = no speaker tracking (silence/alone disabled)
 }
 
 // BuildStateMap constructs the full state machine state map from deps.
@@ -31,9 +33,12 @@ func BuildStateMap(deps Dependencies) map[sm.StateType]sm.State {
 		},
 		sm.StateWaitingRoom: &WaitingRoomState{},
 		sm.StateInCall: &InCallState{
-			Recorder: deps.Recorder,
+			Recorder:  deps.Recorder,
+			PageHooks: deps.PageHooks,
 		},
-		sm.StateRecording: &RecordingState{},
+		sm.StateRecording: &RecordingState{
+			Speakers: deps.Speakers,
+		},
 		sm.StatePaused: &PausedState{
 			Recorder: deps.Recorder,
 		},
