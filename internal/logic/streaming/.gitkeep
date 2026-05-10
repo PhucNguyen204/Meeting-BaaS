@@ -1,0 +1,2 @@
+# Phase 5: WebSocket audio streaming (input + output) and the speaker
+# debounce logic. Port reference: src/streaming.ts.
