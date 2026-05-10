@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Verify go.mod
+        run: go mod download
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test (short)
+        run: go test -race -count=1 -short ./...
+
+      - name: Build all binaries
+        run: |
+          mkdir -p bin
+          go build -o bin/bot-worker ./cmd/bot-worker
+          go build -o bin/api-server ./cmd/api-server
+          go build -o bin/controller ./cmd/controller
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+          args: --timeout=5m
+
+  integration:
+    name: integration (testcontainers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Verify Docker availability
+        run: docker version
+
+      - name: Test (integration)
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+        run: |
+          go test -race -count=1 -tags=integration -timeout 10m \
+            ./internal/infra/storage/postgres/... \
+            ./internal/infra/queue/... \
+            ./internal/infra/storage/s3/...
