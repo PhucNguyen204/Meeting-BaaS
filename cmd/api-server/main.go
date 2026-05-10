@@ -1,12 +1,26 @@
-// Command api-server is the public REST API for queueing bot jobs and
-// dispatching webhooks. Phase 3 deliverable; this main is a stub so the
-// module compiles and the binary exists in CI from day one.
+// Command api-server exposes the public REST API for queueing bot jobs:
+//
+//	GET    /healthz
+//	POST   /v1/bots          — insert into Postgres + enqueue Redis Streams
+//	GET    /v1/bots/{id}     — fetch bot row
+//	POST   /v1/bots/{id}/stop — publish stop signal
+//
+// Configuration is via environment variables:
+//
+//	HTTP_ADDR        listen address (default :8080)
+//	POSTGRES_DSN     pgx connection string (required for /v1/bots)
+//	REDIS_ADDR       redis host:port (default localhost:6379)
+//	REDIS_PASSWORD   optional
+//	QUEUE_STREAM     (default bots:jobs)
+//	LOG_LEVEL        debug|info|warn|error
 package main
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/PhucNguyen204/Meeting-BaaS/internal/app"
 	"github.com/PhucNguyen204/Meeting-BaaS/internal/pkg/logger"
@@ -26,9 +40,14 @@ func main() {
 
 	a, err := app.NewAPIServer(log)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "api-server: setup: %v\n", err)
 		os.Exit(1)
 	}
-	if err := a.Run(context.Background()); err != nil {
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	if err := a.Run(ctx); err != nil && err != context.Canceled {
 		fmt.Fprintf(os.Stderr, "api-server: %v\n", err)
 		os.Exit(1)
 	}

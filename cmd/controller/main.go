@@ -1,14 +1,24 @@
-// Command controller is the Kubernetes controller that watches for new
-// bot jobs on Redis Streams and creates per-bot K8s Jobs.
+// Command controller consumes bot jobs from Redis Streams and dispatches them
+// to bot-worker processes (Phase 3) or K8s Jobs (Phase 6).
 //
-// Phase 6 deliverable. This main exists to keep the binary buildable
-// alongside the others.
+// Phase 3 implementation:
+//
+//	XREADGROUP bots:jobs > controller:<consumer>
+//	→ os/exec ./bin/bot-worker (stdin = BotConfig JSON)
+//	→ wait for clean exit, then XACK
+//
+// Configuration via environment variables (see internal/app.ControllerOptions).
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/PhucNguyen204/Meeting-BaaS/internal/app"
 	"github.com/PhucNguyen204/Meeting-BaaS/internal/pkg/logger"
 )
 
@@ -24,6 +34,17 @@ func main() {
 	}
 	defer func() { _ = log.Sync() }()
 
-	log.Warn("controller is a Phase 1 stub; not implemented")
-	os.Exit(0)
+	c, err := app.NewController(log)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "controller: setup: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	if err := c.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintf(os.Stderr, "controller: %v\n", err)
+		os.Exit(1)
+	}
 }
