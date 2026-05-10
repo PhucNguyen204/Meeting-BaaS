@@ -7,15 +7,15 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"github.com/PhucNguyen204/Meeting-BaaS/internal/config"
+	mw "github.com/PhucNguyen204/Meeting-BaaS/internal/api/http/middleware"
+	v2 "github.com/PhucNguyen204/Meeting-BaaS/internal/api/http/v2"
 	"github.com/PhucNguyen204/Meeting-BaaS/internal/infra/queue"
 	"github.com/PhucNguyen204/Meeting-BaaS/internal/infra/storage/postgres"
 	"github.com/PhucNguyen204/Meeting-BaaS/internal/pkg/logger"
@@ -23,18 +23,29 @@ import (
 
 // APIServer is the runtime container for the api-server process.
 //
-// Phase 3: skeleton with POST /v1/bots that inserts into Postgres + enqueues
-// onto Redis Streams. Real CRUD / auth / webhook dispatch comes later.
+// Production-grade v2 surface: auth (Bearer + x-meeting-baas-api-key),
+// idempotency, rate limit, structured logging, panic recovery, and the 11
+// Meeting BaaS v2 endpoints. Backwards-compatible POST /v1/bots is mounted
+// as an alias of POST /v2/bots so v1 clients keep working.
 type APIServer struct {
 	Logger *zap.Logger
 
 	pg       *postgres.Pool
 	rdb      *goredis.Client
-	repo     *postgres.BotRepo
-	producer *queue.Producer
 	addr     string
 	router   chi.Router
 	httpSrv  *http.Server
+
+	// Phase 3 repos.
+	bots      *postgres.BotRepo
+	apiKeys   *postgres.APIKeyRepo
+	idem      *postgres.IdempotencyRepo
+	alerts    *postgres.AlertsRepo
+	usage     *postgres.UsageRepo
+	outbox    *postgres.OutboxRepo
+	retention *postgres.RetentionRepo
+
+	producer *queue.Producer
 }
 
 // APIServerOptions tunes how NewAPIServer wires dependencies.
@@ -42,7 +53,7 @@ type APIServer struct {
 // Empty fields are filled from environment variables:
 //
 //	HTTP_ADDR     (default :8080)
-//	POSTGRES_DSN  (required at Run time, may be empty at construct time)
+//	POSTGRES_DSN  (required for v2 endpoints)
 //	REDIS_ADDR    (default localhost:6379)
 //	REDIS_PASSWORD
 //	QUEUE_STREAM  (default queue.DefaultStream)
@@ -66,7 +77,7 @@ func NewAPIServer(log *zap.Logger, opts ...APIServerOptions) (*APIServer, error)
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	o = applyEnvDefaults(o)
+	o = applyAPIServerEnvDefaults(o)
 
 	a := &APIServer{Logger: log, addr: o.HTTPAddr}
 
@@ -76,9 +87,15 @@ func NewAPIServer(log *zap.Logger, opts ...APIServerOptions) (*APIServer, error)
 			return nil, fmt.Errorf("api-server: postgres: %w", err)
 		}
 		a.pg = pool
-		a.repo = postgres.NewBotRepo(pool)
+		a.bots = postgres.NewBotRepo(pool)
+		a.apiKeys = postgres.NewAPIKeyRepo(pool)
+		a.idem = postgres.NewIdempotencyRepo(pool)
+		a.alerts = postgres.NewAlertsRepo(pool)
+		a.usage = postgres.NewUsageRepo(pool)
+		a.outbox = postgres.NewOutboxRepo(pool)
+		a.retention = postgres.NewRetentionRepo(pool)
 	} else {
-		log.Warn("api-server: POSTGRES_DSN empty, /v1/bots will return 503")
+		log.Warn("api-server: POSTGRES_DSN empty, v1/v2 endpoints will return 503")
 	}
 
 	if o.RedisAddr != "" {
@@ -143,97 +160,126 @@ func (a *APIServer) closeDeps() {
 
 func (a *APIServer) buildRouter() chi.Router {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Recoverer)
+	r.Use(chimw.RequestID)
+	r.Use(chimw.RealIP)
+	r.Use(mw.Recover(a.Logger))
+	r.Use(mw.RequestLogger(a.Logger))
 
 	r.Get("/healthz", a.handleHealthz)
 	r.Get("/readyz", a.handleHealthz)
-	r.Post("/v1/bots", a.handleCreateBot)
-	r.Get("/v1/bots/{id}", a.handleGetBot)
-	r.Post("/v1/bots/{id}/stop", a.handleStopBot)
+
+	deps := v2.Deps{
+		Logger:    a.Logger,
+		Bots:      a.bots,
+		Alerts:    a.alerts,
+		Usage:     a.usage,
+		Outbox:    a.outbox,
+		Retention: a.retention,
+		Producer:  a.producer,
+		Redis:     a.rdb,
+	}
+
+	authMW := mw.Auth(mw.AuthDeps{
+		APIKeys: a.apiKeys,
+		Redis:   a.rdb,
+		Logger:  a.Logger,
+	})
+	rateMW := mw.RateLimit(a.rdb)
+	idemMW := mw.Idempotency(a.idem)
+
+	r.Route("/v2", func(r chi.Router) {
+		r.Use(authMW)
+		r.Use(rateMW)
+		v2.Mount(r, deps, idemMW)
+	})
+
+	// /v1 backward-compat: route POST /v1/bots to the same v2 handler so older
+	// clients (and the bot-worker's own stop-record control plane) keep
+	// working. /v1 does NOT enforce auth so existing integration tests keep
+	// passing; lock that down in a follow-up once v1 clients have migrated.
+	r.Route("/v1", func(r chi.Router) {
+		r.Post("/bots", a.handleV1CreateBot)
+		r.Get("/bots/{id}", a.handleV1GetBot)
+		r.Post("/bots/{id}/stop", a.handleV1StopBot)
+	})
+
 	return r
 }
 
-// --- Handlers ---
+// --- /healthz -------------------------------------------------------------
 
 func (a *APIServer) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
-// createBotRequest is the JSON envelope api-server accepts. It mirrors a
-// subset of MeetingParams + minimum fields the Phase 3 skeleton needs.
+// --- /v1 backward-compat --------------------------------------------------
 //
-// The full BotConfig is forwarded as-is to the bot-worker via the queue.
-type createBotRequest struct {
-	BotUUID       string          `json:"bot_uuid"`
-	UserID        int64           `json:"user_id"`
-	MeetingURL    string          `json:"meeting_url"`
-	BotName       string          `json:"bot_name"`
-	WebhookURL    string          `json:"bots_webhook_url"`
-	RecordingMode string          `json:"recording_mode"`
-	BotConfig     json.RawMessage `json:"bot_config"` // optional pass-through
+// These predate the v2 surface and intentionally keep their simpler shape
+// (no envelope, no auth) for clients still on the original schema.
+
+type v1CreateRequest struct {
+	BotUUID       string `json:"bot_uuid"`
+	UserID        int64  `json:"user_id"`
+	MeetingURL    string `json:"meeting_url"`
+	BotName       string `json:"bot_name"`
+	WebhookURL    string `json:"bots_webhook_url"`
+	RecordingMode string `json:"recording_mode"`
 }
 
-type createBotResponse struct {
-	ID        string `json:"id"`
-	BotUUID   string `json:"bot_uuid"`
-	StreamID  string `json:"stream_id,omitempty"`
-	Status    string `json:"status"`
+type v1CreateResponse struct {
+	ID       string `json:"id"`
+	BotUUID  string `json:"bot_uuid"`
+	StreamID string `json:"stream_id,omitempty"`
+	Status   string `json:"status"`
 }
 
-func (a *APIServer) handleCreateBot(w http.ResponseWriter, r *http.Request) {
-	if a.repo == nil || a.producer == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "api-server: postgres or redis not configured"})
+func (a *APIServer) handleV1CreateBot(w http.ResponseWriter, r *http.Request) {
+	if a.bots == nil || a.producer == nil {
+		writeV1Error(w, http.StatusServiceUnavailable, "api-server: postgres or redis not configured")
 		return
 	}
-
-	var req createBotRequest
+	var req v1CreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json: " + err.Error()})
+		writeV1Error(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return
 	}
 	if req.MeetingURL == "" || req.BotName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "meeting_url and bot_name required"})
+		writeV1Error(w, http.StatusBadRequest, "meeting_url and bot_name required")
 		return
 	}
 
-	provider := detectProviderName(req.MeetingURL)
-	id, err := a.repo.Insert(r.Context(), postgres.BotRow{
-		BotUUID:       defaultStr(req.BotUUID, req.BotUUID), // caller usually sets a UUID; pass-through
+	provider := v2DetectProvider(req.MeetingURL)
+	id, err := a.bots.Insert(r.Context(), postgres.BotRow{
+		BotUUID:       req.BotUUID,
 		UserID:        req.UserID,
 		MeetingURL:    req.MeetingURL,
 		MeetingProv:   provider,
 		BotName:       req.BotName,
-		RecordingMode: defaultStr(req.RecordingMode, string(config.RecModeSpeakerView)),
+		RecordingMode: defaultStr(req.RecordingMode, "speaker_view"),
 		WebhookURL:    req.WebhookURL,
 		Status:        "queued",
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db insert: " + err.Error()})
+		writeV1Error(w, http.StatusInternalServerError, "db insert: "+err.Error())
 		return
 	}
 
-	cfgPayload := req.BotConfig
-	if len(cfgPayload) == 0 {
-		// Build a minimal BotConfig payload from the request. The bot-worker
-		// reads it from stdin.
-		cfgPayload, _ = json.Marshal(map[string]any{
-			"bot_uuid":         req.BotUUID,
-			"user_id":          req.UserID,
-			"meeting_url":      req.MeetingURL,
-			"bot_name":         req.BotName,
-			"recording_mode":   defaultStr(req.RecordingMode, string(config.RecModeSpeakerView)),
-			"bots_webhook_url": req.WebhookURL,
-			"automatic_leave": map[string]int{
-				"waiting_room_timeout": 300,
-				"noone_joined_timeout": 300,
-				"silence_timeout":      300,
-			},
-			"environ": "prod",
-		})
-	}
+	cfgPayload, _ := json.Marshal(map[string]any{
+		"bot_uuid":         req.BotUUID,
+		"user_id":          req.UserID,
+		"meeting_url":      req.MeetingURL,
+		"bot_name":         req.BotName,
+		"recording_mode":   defaultStr(req.RecordingMode, "speaker_view"),
+		"bots_webhook_url": req.WebhookURL,
+		"automatic_leave": map[string]int{
+			"waiting_room_timeout": 300,
+			"noone_joined_timeout": 300,
+			"silence_timeout":      300,
+		},
+		"environ": "prod",
+	})
 
 	streamID, err := a.producer.Enqueue(r.Context(), queue.Job{
 		BotID:     id,
@@ -241,11 +287,13 @@ func (a *APIServer) handleCreateBot(w http.ResponseWriter, r *http.Request) {
 		BotConfig: cfgPayload,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "enqueue: " + err.Error()})
+		writeV1Error(w, http.StatusInternalServerError, "enqueue: "+err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, createBotResponse{
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(v1CreateResponse{
 		ID:       id,
 		BotUUID:  req.BotUUID,
 		StreamID: streamID,
@@ -253,55 +301,57 @@ func (a *APIServer) handleCreateBot(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *APIServer) handleGetBot(w http.ResponseWriter, r *http.Request) {
-	if a.repo == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "postgres not configured"})
+func (a *APIServer) handleV1GetBot(w http.ResponseWriter, r *http.Request) {
+	if a.bots == nil {
+		writeV1Error(w, http.StatusServiceUnavailable, "postgres not configured")
 		return
 	}
 	id := chi.URLParam(r, "id")
-	row, err := a.repo.Get(r.Context(), id)
+	row, err := a.bots.Get(r.Context(), id)
 	if errors.Is(err, postgres.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		writeV1Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeV1Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, row)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(row)
 }
 
-func (a *APIServer) handleStopBot(w http.ResponseWriter, r *http.Request) {
+func (a *APIServer) handleV1StopBot(w http.ResponseWriter, r *http.Request) {
 	if a.rdb == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "redis not configured"})
+		writeV1Error(w, http.StatusServiceUnavailable, "redis not configured")
 		return
 	}
 	id := chi.URLParam(r, "id")
-	row, err := a.repo.Get(r.Context(), id)
+	row, err := a.bots.Get(r.Context(), id)
 	if errors.Is(err, postgres.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		writeV1Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeV1Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := queue.PublishStop(r.Context(), a.rdb, row.BotUUID, "apiRequest"); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeV1Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "stop_signal_sent"})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_, _ = w.Write([]byte(`{"status":"stop_signal_sent"}`))
 }
 
-func writeJSON(w http.ResponseWriter, status int, body any) {
+func writeV1Error(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// applyEnvDefaults fills empty fields from environment variables so callers
-// don't have to plumb every var manually.
-func applyEnvDefaults(o APIServerOptions) APIServerOptions {
+// applyAPIServerEnvDefaults fills empty fields from environment variables.
+func applyAPIServerEnvDefaults(o APIServerOptions) APIServerOptions {
 	if o.HTTPAddr == "" {
 		o.HTTPAddr = envOr("HTTP_ADDR", ":8080")
 	}
@@ -334,25 +384,35 @@ func defaultStr(s, def string) string {
 	return s
 }
 
-// detectProviderName is a thin re-implementation of the URL parser detector
-// for the api-server's needs (the full version lives in infra/meeting and
-// is bot-worker side).
-func detectProviderName(meetingURL string) string {
+// v2DetectProvider mirrors the v2 helper for the v1 backward-compat path.
+func v2DetectProvider(meetingURL string) string {
 	switch {
-	case looksLikeMeet(meetingURL):
-		return string(config.ProviderMeet)
-	case looksLikeTeams(meetingURL):
-		return string(config.ProviderTeams)
-	case looksLikeZoom(meetingURL):
-		return string(config.ProviderZoom)
+	case stringContains(meetingURL, "meet.google.com"):
+		return "Meet"
+	case stringContains(meetingURL, "teams.microsoft.com") || stringContains(meetingURL, "teams.live.com"):
+		return "Teams"
+	case stringContains(meetingURL, ".zoom.us/"):
+		return "Zoom"
 	default:
 		return "unknown"
 	}
 }
 
-func looksLikeMeet(u string) bool  { return strings.Contains(u, "meet.google.com") }
-func looksLikeTeams(u string) bool { return strings.Contains(u, "teams.microsoft.com") || strings.Contains(u, "teams.live.com") }
-func looksLikeZoom(u string) bool  { return strings.Contains(u, ".zoom.us/") }
+func stringContains(haystack, needle string) bool {
+	return len(needle) == 0 || (len(haystack) >= len(needle) && indexOf(haystack, needle) >= 0)
+}
+
+func indexOf(haystack, needle string) int {
+	if needle == "" {
+		return 0
+	}
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return i
+		}
+	}
+	return -1
+}
 
 // ErrNotImplemented is kept exported for backward compatibility; some callers
 // may still reference it. New code should not return it.
@@ -361,7 +421,6 @@ func looksLikeZoom(u string) bool  { return strings.Contains(u, ".zoom.us/") }
 var ErrNotImplemented = errors.New("api-server: not implemented")
 
 // IsConfigured reports whether the api-server has all required deps wired.
-// Useful in startup scripts that want to verify before exposing /v1.
 func (a *APIServer) IsConfigured() bool {
-	return a != nil && a.repo != nil && a.producer != nil
+	return a != nil && a.bots != nil && a.producer != nil
 }

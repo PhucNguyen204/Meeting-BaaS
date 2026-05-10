@@ -8,10 +8,12 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 
+	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	httph "github.com/PhucNguyen204/Meeting-BaaS/internal/api/http"
@@ -172,6 +174,13 @@ func (a *BotWorker) Run(ctx context.Context, opts BotWorkerOptions) error {
 		}
 	}()
 
+	// Subscribe to Redis Pub/Sub bot:cmd:<uuid> for pause/resume/chat commands
+	// dispatched by the api-server's v2 endpoints. Failure to subscribe is
+	// non-fatal: the bot still works in standalone mode without it.
+	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
+		go a.subscribeBotCommands(httpCtx, redisAddr, os.Getenv("REDIS_PASSWORD"))
+	}
+
 	// Run the state machine. This drives the entire bot lifecycle:
 	// Initialization ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ WaitingRoom ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ InCall ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Recording ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Cleanup ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Terminated
 	log.Info("starting state machine")
@@ -240,6 +249,73 @@ func (pr *machinePauseResumer) Resume(_ context.Context) error {
 	}
 	pr.mc.SetPaused(false)
 	return nil
+}
+
+// subscribeBotCommands listens on bot:cmd:<uuid> for runtime commands sent by
+// the api-server's v2 endpoints (pause-recording, resume-recording,
+// chat-messages). Each message is a JSON object like
+//
+//	{"action": "pause"}
+//	{"action": "chat", "text": "hello"}
+//
+// Failure to connect / decode is logged and the loop simply keeps trying so
+// the bot stays operational even if Redis flaps.
+func (a *BotWorker) subscribeBotCommands(ctx context.Context, addr, password string) {
+	log := a.Logger.With(zap.String("subsystem", "cmd-subscriber"))
+
+	rdb := goredis.NewClient(&goredis.Options{Addr: addr, Password: password})
+	defer func() { _ = rdb.Close() }()
+
+	channel := "bot:cmd:" + a.Cfg.BotUUID
+	sub := rdb.Subscribe(ctx, channel)
+	defer func() { _ = sub.Close() }()
+
+	if _, err := sub.Receive(ctx); err != nil {
+		log.Warn("subscribe failed", zap.String("channel", channel), zap.Error(err))
+		return
+	}
+	log.Info("listening for bot commands", zap.String("channel", channel))
+
+	mc := a.Machine.Context()
+	ch := sub.Channel()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			var cmd struct {
+				Action string `json:"action"`
+				Text   string `json:"text,omitempty"`
+			}
+			if err := json.Unmarshal([]byte(msg.Payload), &cmd); err != nil {
+				log.Warn("bad command payload", zap.String("payload", msg.Payload), zap.Error(err))
+				continue
+			}
+			switch cmd.Action {
+			case "pause":
+				mc.SetPaused(true)
+				log.Info("paused by api-server")
+			case "resume":
+				mc.SetPaused(false)
+				log.Info("resumed by api-server")
+			case "chat":
+				if page := mc.Page; page != nil && cmd.Text != "" {
+					go func(p domain.Page, text string) {
+						sendCtx, cancel := context.WithTimeout(context.Background(), 10_000_000_000) // 10s
+						defer cancel()
+						if err := meet.SendEntryMessage(sendCtx, p, text); err != nil {
+							log.Warn("chat send failed", zap.Error(err))
+						}
+					}(page, cmd.Text)
+				}
+			default:
+				log.Warn("unknown command action", zap.String("action", cmd.Action))
+			}
+		}
+	}
 }
 
 // audioCapEnableHook adapts meet.AudioCapture to the states.PageHook
