@@ -1,0 +1,2 @@
+# Phase 3+: redis client wrappers. Streams (job queue + retry), pub/sub
+# (stop signal), idempotency keys.

@@ -1,0 +1,2 @@
+# Phase 2: FFmpeg-based screen + audio recorder.
+# Port reference: src/recording/ScreenRecorder.ts + src/recording/Transcoder.ts.

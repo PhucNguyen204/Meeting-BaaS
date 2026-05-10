@@ -1,0 +1,2 @@
+# Phase 4: S3 / MinIO uploader for recordings + bot.log.
+# Port reference: src/utils/S3Uploader.ts.

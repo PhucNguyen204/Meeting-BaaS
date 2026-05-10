@@ -1,0 +1,2 @@
+# Phase 4: per-event webhook builder + signing. Phase 4.
+# Port reference: src/events.ts BotLifecycleEvents.
