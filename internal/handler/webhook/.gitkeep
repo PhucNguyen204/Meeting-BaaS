@@ -1,0 +1,2 @@
+# Phase 4: webhook dispatcher (delivery worker reading from
+# webhook_deliveries table). Port reference: src/events.ts.
